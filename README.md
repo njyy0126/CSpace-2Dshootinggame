@@ -22,3 +22,4 @@ The server serves the built client from the same Node process, with all room and
 - Start command: `npm run start`
 - No database is required
 - Room state is ephemeral and will reset if the free instance sleeps or restarts
+![Uploading image.png…]()
