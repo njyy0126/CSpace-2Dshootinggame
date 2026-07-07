@@ -81,7 +81,7 @@ test("power-up flow exposes field drops, grants and overwrites abilities, and ke
       moveX: 0,
       moveY: 0,
       aimX: 600,
-      aimY: 120,
+      aimY: 92,
       firing: true
     }, 260);
     await expect.poll(async () => countOwnedProjectiles(hostPage)).toBeGreaterThanOrEqual(2);
@@ -89,11 +89,11 @@ test("power-up flow exposes field drops, grants and overwrites abilities, and ke
       moveX: 0,
       moveY: 0,
       aimX: 600,
-      aimY: 120,
+      aimY: 92,
       firing: false
     });
   } else {
-    await fireAtWorld(hostPage, 600, 120);
+    await fireAtWorld(hostPage, 600, 92);
     await expect.poll(async () => countOwnedProjectiles(hostPage)).toBeGreaterThan(0);
 
     if (abilityType === "heavy-shot") {
@@ -246,8 +246,27 @@ async function collectPickup(page: Page, pickupId: string, pickupType: string) {
       continue;
     }
 
-    await moveToCurrentPickup(page);
-    await page.waitForTimeout(120);
+    const deltaX = pickup.x - state.localPlayer.x;
+    const deltaY = pickup.y - state.localPlayer.y;
+    if (Math.hypot(deltaX, deltaY) <= 18) {
+      await sendInput(page, {
+        moveX: 0,
+        moveY: 0,
+        aimX: pickup.x,
+        aimY: pickup.y,
+        firing: false
+      });
+      await page.waitForTimeout(120);
+      continue;
+    }
+
+    await holdInput(page, {
+      moveX: Math.abs(deltaX) <= 8 ? 0 : Math.sign(deltaX),
+      moveY: Math.abs(deltaY) <= 8 ? 0 : Math.sign(deltaY),
+      aimX: pickup.x,
+      aimY: pickup.y,
+      firing: false
+    }, 90);
   }
 
   throw new Error(`Timed out collecting pickup ${pickupType}`);

@@ -1,5 +1,12 @@
 import Phaser from "phaser";
-import { ARENA_MAP, SERVER_TICK_MS } from "../../../shared/constants";
+import {
+  ARENA_MAP,
+  GRENADE_BLAST_RADIUS,
+  GRENADE_THROW_RANGE,
+  PLAYER_RADIUS,
+  SERVER_TICK_MS
+} from "../../../shared/constants";
+import { getPlayerClass } from "../../../shared/playerClass";
 import type {
   BombSnapshot,
   LaserSnapshot,
@@ -17,6 +24,8 @@ const PLAYER_LABEL_OFFSET = 28;
 const PLAYER_SHIELD_RADIUS = 18;
 const PLAYER_ABILITY_RING_RADIUS = 22;
 const PLAYER_AIM_ROTATION_OFFSET = Phaser.Math.DegToRad(-36);
+const GRENADE_AIM_ASSIST_DEPTH = 12;
+const GRENADE_TARGET_MARKER_RADIUS = 10;
 
 function getAbilityTint(ability: PlayerAbility | null) {
   if (ability === "ricochet") {
@@ -89,6 +98,8 @@ export class ArenaScene extends Phaser.Scene {
   private pickupGlows = new Map<string, Phaser.GameObjects.Image>();
   private pickupCores = new Map<string, Phaser.GameObjects.Image>();
   private walls = new Map<string, Phaser.GameObjects.Image>();
+  private grenadierRangeRing: Phaser.GameObjects.Graphics | null = null;
+  private grenadierTargetMarker: Phaser.GameObjects.Graphics | null = null;
   private isPointerFiring = false;
   private fireLatchUntil = 0;
   private lastPointerWorld: { x: number; y: number } | null = null;
@@ -169,6 +180,7 @@ export class ArenaScene extends Phaser.Scene {
     this.syncProjectiles(Object.values(room.activeProjectiles));
     this.syncLasers(Object.values(room.activeLasers ?? {}));
     this.syncBombs(Object.values(room.activeBombs ?? {}));
+    this.syncGrenadierAimAssist(room);
   }
 
   private bindNativePointerInput() {
@@ -418,23 +430,31 @@ export class ArenaScene extends Phaser.Scene {
       let graphic = this.lasers.get(laser.id);
       if (!graphic) {
         graphic = this.add.graphics();
+        graphic.setBlendMode(Phaser.BlendModes.ADD);
         this.lasers.set(laser.id, graphic);
       }
 
+      const tint = getLaserTint(laser);
+      const isActive = now >= laser.activatesAt;
+      const laserTelegraphAlpha = isActive ? 0.36 : 0.58;
+      const outerWidth = laser.radius * (isActive ? 6.4 : 8.4);
+      const coreWidth = laser.radius * (isActive ? 3.2 : 2.2);
+      const startPoint = laser.path[0]!;
+      const endPoint = laser.path[laser.path.length - 1]!;
+
       graphic.clear();
-      graphic.lineStyle(laser.radius * 2, getLaserTint(laser), now >= laser.activatesAt ? 0.9 : 0.38);
-      graphic.beginPath();
-
-      laser.path.forEach((point, index) => {
-        if (index === 0) {
-          graphic.moveTo(point.x, point.y);
-          return;
-        }
-
-        graphic.lineTo(point.x, point.y);
-      });
-
-      graphic.strokePath();
+      graphic.lineStyle(outerWidth, tint, laserTelegraphAlpha);
+      this.strokeLaserPath(graphic, laser.path);
+      graphic.lineStyle(laser.radius * (isActive ? 4.2 : 3.4), 0xb6f5ff, isActive ? 0.72 : 0.32);
+      this.strokeLaserPath(graphic, laser.path);
+      graphic.lineStyle(coreWidth, 0xf8fafc, isActive ? 1 : 0.82);
+      this.strokeLaserPath(graphic, laser.path);
+      graphic.fillStyle(tint, isActive ? 0.4 : 0.24);
+      graphic.fillCircle(startPoint.x, startPoint.y, outerWidth * 0.28);
+      graphic.fillCircle(endPoint.x, endPoint.y, outerWidth * 0.2);
+      graphic.fillStyle(0xf8fafc, isActive ? 0.84 : 0.56);
+      graphic.fillCircle(startPoint.x, startPoint.y, coreWidth * 0.46);
+      graphic.fillCircle(endPoint.x, endPoint.y, coreWidth * 0.36);
     }
 
     for (const [id, graphic] of this.lasers) {
@@ -485,6 +505,125 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
+  private strokeLaserPath(graphic: Phaser.GameObjects.Graphics, path: LaserSnapshot["path"]) {
+    for (let index = 1; index < path.length; index += 1) {
+      const start = path[index - 1]!;
+      const end = path[index]!;
+      graphic.lineBetween(start.x, start.y, end.x, end.y);
+    }
+  }
+
+  private syncGrenadierAimAssist(room: RoomSnapshot) {
+    const localPlayerId = getClientState().localPlayerId;
+    const localPlayer = localPlayerId ? room.players[localPlayerId] : null;
+
+    if (
+      !localPlayer ||
+      !localPlayer.alive ||
+      localPlayer.waitingForNextRound ||
+      room.phase !== "playing" ||
+      getPlayerClass(localPlayer) !== "grenadier"
+    ) {
+      this.hideGrenadierAimAssist();
+      return;
+    }
+
+    const throwRange = this.getGrenadeThrowRange(localPlayer.ability);
+    const blastRadius = this.getGrenadePreviewBlastRadius(localPlayer.ability);
+    const target = this.lastPointerWorld ?? {
+      x: localPlayer.x + localPlayer.aim.x * throwRange,
+      y: localPlayer.y + localPlayer.aim.y * throwRange
+    };
+    const targetIsLegal = this.isGrenadeTargetLegal(localPlayer, target, room.walls);
+    const rangeTint = localPlayer.ability === "ricochet" ? 0x22c55e : 0xf97316;
+    const markerTint = targetIsLegal ? rangeTint : 0xef4444;
+
+    if (!this.grenadierRangeRing) {
+      this.grenadierRangeRing = this.add.graphics();
+      this.grenadierRangeRing.setDepth(GRENADE_AIM_ASSIST_DEPTH);
+    }
+
+    if (!this.grenadierTargetMarker) {
+      this.grenadierTargetMarker = this.add.graphics();
+      this.grenadierTargetMarker.setDepth(GRENADE_AIM_ASSIST_DEPTH + 1);
+    }
+
+    this.grenadierRangeRing.clear();
+    this.grenadierRangeRing.setVisible(true);
+    this.grenadierRangeRing.lineStyle(2, rangeTint, localPlayer.ability === "ricochet" ? 0.52 : 0.34);
+    this.grenadierRangeRing.strokeCircle(localPlayer.x, localPlayer.y, throwRange);
+    this.grenadierRangeRing.lineStyle(1.5, markerTint, targetIsLegal ? 0.22 : 0.3);
+    this.grenadierRangeRing.beginPath();
+    this.grenadierRangeRing.moveTo(localPlayer.x, localPlayer.y);
+    this.grenadierRangeRing.lineTo(target.x, target.y);
+    this.grenadierRangeRing.strokePath();
+
+    this.grenadierTargetMarker.clear();
+    this.grenadierTargetMarker.setVisible(true);
+    this.grenadierTargetMarker.lineStyle(2.25, markerTint, targetIsLegal ? 0.88 : 0.72);
+    this.grenadierTargetMarker.strokeCircle(target.x, target.y, GRENADE_TARGET_MARKER_RADIUS);
+    this.grenadierTargetMarker.lineStyle(1.6, markerTint, targetIsLegal ? 0.34 : 0.28);
+    this.grenadierTargetMarker.strokeCircle(target.x, target.y, blastRadius);
+    this.grenadierTargetMarker.fillStyle(markerTint, targetIsLegal ? 0.18 : 0.12);
+    this.grenadierTargetMarker.fillCircle(target.x, target.y, targetIsLegal ? 4 : 3);
+    this.grenadierTargetMarker.lineStyle(2.5, markerTint, targetIsLegal ? 0.86 : 0.7);
+    this.grenadierTargetMarker.beginPath();
+
+    if (targetIsLegal) {
+      this.grenadierTargetMarker.moveTo(target.x - 7, target.y);
+      this.grenadierTargetMarker.lineTo(target.x + 7, target.y);
+      this.grenadierTargetMarker.moveTo(target.x, target.y - 7);
+      this.grenadierTargetMarker.lineTo(target.x, target.y + 7);
+    } else {
+      this.grenadierTargetMarker.moveTo(target.x - 7, target.y - 7);
+      this.grenadierTargetMarker.lineTo(target.x + 7, target.y + 7);
+      this.grenadierTargetMarker.moveTo(target.x - 7, target.y + 7);
+      this.grenadierTargetMarker.lineTo(target.x + 7, target.y - 7);
+    }
+
+    this.grenadierTargetMarker.strokePath();
+  }
+
+  private hideGrenadierAimAssist() {
+    this.grenadierRangeRing?.clear();
+    this.grenadierRangeRing?.setVisible(false);
+    this.grenadierTargetMarker?.clear();
+    this.grenadierTargetMarker?.setVisible(false);
+  }
+
+  private getGrenadeThrowRange(ability: PlayerAbility | null) {
+    return GRENADE_THROW_RANGE * (ability === "ricochet" ? 2 : 1);
+  }
+
+  private getGrenadePreviewBlastRadius(ability: PlayerAbility | null) {
+    return ability === "heavy-shot" ? GRENADE_BLAST_RADIUS * 2 : GRENADE_BLAST_RADIUS;
+  }
+
+  private isGrenadeTargetLegal(
+    player: RoomSnapshot["players"][string],
+    target: { x: number; y: number },
+    walls: Wall[]
+  ) {
+    const throwRange = this.getGrenadeThrowRange(player.ability);
+    return (
+      Math.hypot(target.x - player.x, target.y - player.y) <= throwRange &&
+      target.x >= PLAYER_RADIUS &&
+      target.x <= ARENA_MAP.width - PLAYER_RADIUS &&
+      target.y >= PLAYER_RADIUS &&
+      target.y <= ARENA_MAP.height - PLAYER_RADIUS &&
+      !walls.some((wall) => this.circleHitsWallAt(target.x, target.y, PLAYER_RADIUS, wall))
+    );
+  }
+
+  private circleHitsWallAt(x: number, y: number, radius: number, wall: Wall) {
+    const nearestX = Phaser.Math.Clamp(x, wall.x, wall.x + wall.width);
+    const nearestY = Phaser.Math.Clamp(y, wall.y, wall.y + wall.height);
+    const distanceX = x - nearestX;
+    const distanceY = y - nearestY;
+
+    return distanceX * distanceX + distanceY * distanceY < radius * radius;
+  }
+
   private clearSceneObjects() {
     for (const collection of [
       this.players,
@@ -504,5 +643,10 @@ export class ArenaScene extends Phaser.Scene {
 
       collection.clear();
     }
+
+    this.grenadierRangeRing?.destroy();
+    this.grenadierRangeRing = null;
+    this.grenadierTargetMarker?.destroy();
+    this.grenadierTargetMarker = null;
   }
 }

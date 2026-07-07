@@ -176,7 +176,7 @@ const ABILITY_COPY: Record<
     detailByClass: {
       "machine-gunner": "Your bullets bounce off one wall.",
       "laser-gunner": "Your laser path is calculated with one wall bounce.",
-      grenadier: "Throw range expands to any legal point on the map."
+      grenadier: "Your throw range is doubled."
     }
   },
   speed: {

@@ -32,7 +32,7 @@ type LocalDebugState = {
       }
     >;
     activePickups: Record<string, { id: string; type: string; x: number; y: number }>;
-    players: Record<string, { id: string; classType?: string }>;
+    players: Record<string, { id: string; classType?: string; health?: number }>;
   };
 };
 
@@ -97,18 +97,14 @@ test("duplicate laser selection stays synced and laser shots keep their delayed 
     });
 
   await expect
-    .poll(async () => {
-      const state = await getRoomDebugState(hostPage);
-      const laser = Object.values(state.room.activeLasers)[0];
-      return laser ? laser.damageApplied : null;
-    })
+    .poll(async () => observeActivatedLaser(hostPage))
     .toBe(true);
 
   await hostContext.close();
   await guestContext.close();
 });
 
-test("grenadier respects local throw range and explodes after 0.5 seconds", async ({
+test("grenadier respects local throw range, then doubles it with green power-up and still explodes after 0.5 seconds", async ({
   browser,
   baseURL
 }) => {
@@ -153,15 +149,27 @@ test("grenadier respects local throw range and explodes after 0.5 seconds", asyn
       effect: null
     });
 
+  await waitForObservedBombState(hostPage, "exploding");
+
+  await expect.poll(async () => Object.keys((await getRoomDebugState(hostPage)).room.activeBombs).length).toBe(0);
+
+  const ricochetPickup = await waitForPickupType(hostPage, "ricochet", 12_000);
+  await collectPickup(hostPage, ricochetPickup.id, ricochetPickup.type);
+  await expect.poll(async () => (await getRoomDebugState(hostPage)).localPlayer.ability).toBe("ricochet");
+
+  await fireAtWorld(hostPage, 500, 92);
   await expect
     .poll(async () => {
       const state = await getRoomDebugState(hostPage);
       const bomb = Object.values(state.room.activeBombs)[0];
-      return bomb?.state ?? null;
+      return bomb ? { state: bomb.state, effect: bomb.effect, targetX: bomb.target.x, targetY: bomb.target.y } : null;
     })
-    .toBe("exploding");
-
-  await expect.poll(async () => Object.keys((await getRoomDebugState(hostPage)).room.activeBombs).length).toBe(0);
+    .toMatchObject({
+      state: "arming",
+      effect: "ricochet",
+      targetX: 500,
+      targetY: 92
+    });
 
   await hostContext.close();
   await guestContext.close();
@@ -264,4 +272,98 @@ async function holdInput(
     await sendInput(page, input);
     await page.waitForTimeout(intervalMs);
   }
+}
+
+async function observeActivatedLaser(page: Page, timeoutMs = 1_000, intervalMs = 40) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const state = await getRoomDebugState(page);
+    if (Object.values(state.room.activeLasers).some((laser) => laser.damageApplied)) {
+      return true;
+    }
+
+    await page.waitForTimeout(intervalMs);
+  }
+
+  return false;
+}
+
+async function waitForObservedBombState(
+  page: Page,
+  desiredState: LocalDebugState["room"]["activeBombs"][string]["state"],
+  timeoutMs = 1_500,
+  intervalMs = 40
+) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const state = await getRoomDebugState(page);
+    const bomb = Object.values(state.room.activeBombs)[0];
+
+    if (bomb?.state === desiredState) {
+      return;
+    }
+
+    await page.waitForTimeout(intervalMs);
+  }
+
+  throw new Error(`Timed out waiting to observe bomb state "${desiredState}"`);
+}
+
+async function waitForPickupType(page: Page, pickupType: string, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const state = await getRoomDebugState(page);
+    const pickup = Object.values(state.room.activePickups).find((candidate) => candidate.type === pickupType) ?? null;
+    if (pickup) {
+      return pickup;
+    }
+
+    await page.waitForTimeout(120);
+  }
+
+  throw new Error(`Timed out waiting for pickup type "${pickupType}"`);
+}
+
+async function collectPickup(page: Page, pickupId: string, pickupType: string, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const state = await getRoomDebugState(page);
+    if (state.localPlayer.ability === pickupType) {
+      return;
+    }
+
+    const pickup = Object.values(state.room.activePickups).find((candidate) => candidate.id === pickupId) ?? null;
+    if (!pickup) {
+      await page.waitForTimeout(100);
+      continue;
+    }
+
+    const deltaX = pickup.x - state.localPlayer.x;
+    const deltaY = pickup.y - state.localPlayer.y;
+    if (Math.hypot(deltaX, deltaY) <= 18) {
+      await sendInput(page, {
+        moveX: 0,
+        moveY: 0,
+        aimX: pickup.x,
+        aimY: pickup.y,
+        firing: false
+      });
+      await page.waitForTimeout(120);
+      continue;
+    }
+
+    await holdInput(page, {
+      moveX: Math.abs(deltaX) <= 8 ? 0 : Math.sign(deltaX),
+      moveY: Math.abs(deltaY) <= 8 ? 0 : Math.sign(deltaY),
+      aimX: pickup.x,
+      aimY: pickup.y,
+      firing: false
+    }, 90);
+  }
+
+  throw new Error(`Timed out collecting pickup "${pickupType}"`);
 }

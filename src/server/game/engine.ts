@@ -436,10 +436,10 @@ export function createEngine() {
       now: number
     ): AttackSpawnResult {
       const target = { x: input.aimX, y: input.aimY };
-      const hasFullMapRange = player.ability === "ricochet";
+      const throwRange = this.getGrenadeThrowRange(player.ability);
 
       if (
-        (!hasFullMapRange && Math.hypot(target.x - player.x, target.y - player.y) > GRENADE_THROW_RANGE) ||
+        Math.hypot(target.x - player.x, target.y - player.y) > throwRange ||
         !isNavigablePoint(target.x, target.y, room.walls, PLAYER_RADIUS)
       ) {
         return { consumedCooldown: false };
@@ -786,6 +786,9 @@ export function createEngine() {
     },
     getGrenadeBlastRadius(ability: PlayerAbility | null) {
       return ability === "heavy-shot" ? GRENADE_BLAST_RADIUS * 2 : GRENADE_BLAST_RADIUS;
+    },
+    getGrenadeThrowRange(ability: PlayerAbility | null) {
+      return ability === "ricochet" ? GRENADE_THROW_RANGE * 2 : GRENADE_THROW_RANGE;
     },
     getModifierEffect(ability: PlayerAbility | null): ProjectileEffect | null {
       if (ability === "heavy-shot" || ability === "ricochet") {

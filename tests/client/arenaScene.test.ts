@@ -104,6 +104,23 @@ describe("arena scene rendering", () => {
     expect(source).toContain("blastRadius");
   });
 
+  it("renders a grenadier throw range ring and invalid target feedback for local aim assistance", () => {
+    const source = readFileSync("src/client/game/scenes/ArenaScene.ts", "utf8");
+
+    expect(source).toContain("syncGrenadierAimAssist");
+    expect(source).toContain("grenadierRangeRing");
+    expect(source).toContain("grenadierTargetMarker");
+    expect(source).toContain("isGrenadeTargetLegal");
+  });
+
+  it("renders lasers with layered telegraph strokes so the delayed warning reads more clearly before damage lands", () => {
+    const source = readFileSync("src/client/game/scenes/ArenaScene.ts", "utf8");
+
+    expect(source).toContain("laserTelegraphAlpha");
+    expect(source).toContain("outerWidth");
+    expect(source).toContain("coreWidth");
+  });
+
   it("honors the debug input override so e2e input does not get stomped by the client tick loop", () => {
     const source = readFileSync("src/client/game/scenes/ArenaScene.ts", "utf8");
 

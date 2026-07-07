@@ -157,4 +157,28 @@ describe("class system client view model", () => {
     expect((model.gameHud as any)?.activeAbilityType).toBe("heavy-shot");
     expect((model.gameHud as any)?.activeAbilityLabel).toContain("Heavy Shot");
   });
+
+  it("describes grenadier green ability as a doubled throw range instead of a full-map throw", () => {
+    const room = createRoom({
+      phase: "playing",
+      players: {
+        host: {
+          ...createRoom().players.host,
+          classType: "grenadier",
+          ability: "ricochet"
+        },
+        guest: createRoom().players.guest
+      } as any
+    });
+    const model = createAppViewModel(
+      createState({
+        room,
+        localPlayerId: "host"
+      })
+    );
+
+    expect((model.gameHud as any)?.activeAbilityType).toBe("ricochet");
+    expect((model.gameHud as any)?.activeAbilityDetail).toContain("doubled");
+    expect((model.gameHud as any)?.activeAbilityDetail).not.toContain("any legal point");
+  });
 });

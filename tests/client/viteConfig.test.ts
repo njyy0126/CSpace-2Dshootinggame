@@ -11,4 +11,12 @@ describe("vite dev server", () => {
     expect(typeof socketProxy).toBe("object");
     expect(socketProxy && "target" in socketProxy ? socketProxy.target : undefined).toBe("http://localhost:3000");
   });
+
+  it("splits Phaser into its own build chunk so the lazy arena bundle does not carry the full vendor weight alone", () => {
+    const config = typeof viteConfig === "function" ? viteConfig({ command: "build", mode: "test" }) : viteConfig;
+    const manualChunks = config.build?.rollupOptions?.output;
+    const output = Array.isArray(manualChunks) ? manualChunks[0] : manualChunks;
+
+    expect(output && "manualChunks" in output ? output.manualChunks : undefined).toBeTypeOf("function");
+  });
 });

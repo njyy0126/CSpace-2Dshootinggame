@@ -305,22 +305,12 @@ describe("class system server flow", () => {
     expect(Object.values(boostedRoom.activeLasers ?? {})).toHaveLength(2);
   });
 
-  it("keeps grenades inside the default throw range, but green ability unlocks any legal point on the map", () => {
-    const room = createCombatRoom([
-      {
-        id: "blocked-throw",
-        kind: "cover",
-        destructible: true,
-        x: 680,
-        y: 120,
-        width: 80,
-        height: 80
-      }
-    ]);
+  it("keeps grenades inside the default throw range, while green ability doubles but does not remove the range cap", () => {
+    const room = createCombatRoom();
     room.players.host.classType = "grenadier";
     room.playerInputs.host = {
       ...room.playerInputs.host,
-      aimX: 720,
+      aimX: 500,
       aimY: 120,
       firing: true,
       fireQueued: true,
@@ -338,7 +328,7 @@ describe("class system server flow", () => {
       ...room.playerInputs.host,
       firing: true,
       fireQueued: true,
-      aimX: 600,
+      aimX: 500,
       aimY: 120,
       lastFiredAt: 0
     };

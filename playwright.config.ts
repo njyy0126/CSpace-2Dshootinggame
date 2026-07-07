@@ -11,7 +11,7 @@ export default defineConfig({
   webServer: {
     command: "npm run start",
     url: "http://127.0.0.1:3000",
-    reuseExistingServer: true,
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === "1",
     env: {
       PORT: "3000",
       PICKUP_TEST_SEQUENCE: "ricochet,speed,heavy-shot,rapid-fire",
